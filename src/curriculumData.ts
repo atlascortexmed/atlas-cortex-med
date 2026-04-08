@@ -6,6 +6,7 @@ export const curriculumDB: CurriculumDB = {
       "id": "neumonologia",
       "title": "Neumonología (Libro Pulmón 2026)",
       "subtitle": "Ciclo Clínico Oficial",
+      "year": 4,
       "modules": [
         {
           "id": "modulo_cotidiano",

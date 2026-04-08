@@ -53,6 +53,50 @@
       },
       "required": ["moduleId", "title", "transcript"]
     },
+    "Book": {
+      "title": "Book",
+      "description": "Recommended medical book",
+      "type": "object",
+      "properties": {
+        "subjectId": { "type": "string" },
+        "title": { "type": "string" },
+        "author": { "type": "string" },
+        "description": { "type": "string" },
+        "color": { "type": "string", "enum": ["bordeaux", "gold", "blue"] },
+        "order": { "type": "number" }
+      },
+      "required": ["subjectId", "title", "author"]
+    },
+    "Summary": {
+      "title": "Summary",
+      "description": "Study summary for a subject",
+      "type": "object",
+      "properties": {
+        "subjectId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "details": { "type": "string" },
+        "order": { "type": "number" }
+      },
+      "required": ["subjectId", "title", "content"]
+    },
+    "ClinicalCase": {
+      "title": "ClinicalCase",
+      "description": "Clinical case for practice",
+      "type": "object",
+      "properties": {
+        "subjectId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "patientHistory": { "type": "string" },
+        "physicalExam": { "type": "string" },
+        "labs": { "type": "string" },
+        "diagnosis": { "type": "string" },
+        "management": { "type": "string" },
+        "order": { "type": "number" }
+      },
+      "required": ["subjectId", "title", "description"]
+    },
     "Material": {
       "title": "Material",
       "description": "Study material like PDFs",
@@ -91,6 +135,18 @@
     "/subjects/{subjectId}/modules/{moduleId}/chapters/{chapterId}": {
       "schema": "Chapter",
       "description": "Chapters within a module"
+    },
+    "/subjects/{subjectId}/books/{bookId}": {
+      "schema": "Book",
+      "description": "Books for a subject"
+    },
+    "/subjects/{subjectId}/summaries/{summaryId}": {
+      "schema": "Summary",
+      "description": "Summaries for a subject"
+    },
+    "/subjects/{subjectId}/cases/{caseId}": {
+      "schema": "ClinicalCase",
+      "description": "Clinical cases for a subject"
     },
     "/materials/{materialId}": {
       "schema": "Material",

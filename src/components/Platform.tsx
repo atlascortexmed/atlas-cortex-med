@@ -3,17 +3,24 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   BookOpen, CheckSquare, BarChart3, Headphones, Library, FileText, 
-  Stethoscope, LogOut, Menu, X, Play, Download, Send, Brain, Settings, Plus, Loader2
+  Stethoscope, LogOut, Menu, X, Play, Download, Send, Brain, Settings, Plus, Loader2,
+  Calculator, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { getCortexResponse } from '../lib/gemini';
-import { subscribeToSubjects, getModules, getChapters, triggerGeneration } from '../lib/curriculumService';
-import { Subject, Module, Chapter } from '../types';
+import { 
+  subscribeToSubjects, getModules, getChapters, 
+  getBooks, getSummaries, getCases 
+} from '../lib/curriculumService';
+import { generateFullSubject, generateQuickSummaries, STANDARD_CURRICULUM } from '../lib/aiMotor';
+import { Subject, Module, Chapter, Book, Summary, ClinicalCase } from '../types';
+import MedicalCalculators from './Calculators';
+import RichTextEditor from './RichTextEditor';
 
 export default function Platform() {
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [activeView, setActiveView] = useState<'curso' | 'biblioteca' | 'podcast'>('curso');
-  const [activeCourseTab, setActiveCourseTab] = useState<'material' | 'eval' | 'foro'>('material');
+  const [activeView, setActiveView] = useState<string>('curso');
+  const [activeCourseTab, setActiveCourseTab] = useState<'material' | 'eval' | 'foro' | 'notas'>('material');
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [aiMode, setAiMode] = useState<'strict' | 'unfiltered'>('strict');
   const [chatMessages, setChatMessages] = useState<{role: 'bot' | 'user', text: string}[]>([
@@ -21,6 +28,8 @@ export default function Platform() {
   ]);
   const [aiInput, setAiInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [chapterNotes, setChapterNotes] = useState('');
+  const [isSavingNote, setIsSavingNote] = useState(false);
   
   // Firestore Data
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -29,12 +38,16 @@ export default function Platform() {
   const [currentModule, setCurrentModule] = useState<Module | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null);
+  const [books, setBooks] = useState<Book[]>([]);
+  const [summaries, setSummaries] = useState<Summary[]>([]);
+  const [cases, setCases] = useState<ClinicalCase[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Admin Generation
   const [isGenerating, setIsGenerating] = useState(false);
   const [genYear, setGenYear] = useState(1);
   const [genTitle, setGenTitle] = useState('');
+  const [genSource, setGenSource] = useState('');
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -62,10 +75,10 @@ export default function Platform() {
 
   useEffect(() => {
     if (currentSubject) {
-      getModules(currentSubject.id!).then(data => {
-        setModules(data);
-        if (data.length > 0) setCurrentModule(data[0]);
-      });
+      getModules(currentSubject.id!).then(setModules);
+      getBooks(currentSubject.id!).then(setBooks);
+      getSummaries(currentSubject.id!).then(setSummaries);
+      getCases(currentSubject.id!).then(setCases);
     }
   }, [currentSubject]);
 
@@ -79,8 +92,23 @@ export default function Platform() {
   }, [currentSubject, currentModule]);
 
   useEffect(() => {
+    if (currentChapter) {
+      const savedNotes = localStorage.getItem(`cortex_notes_${currentChapter.id}`);
+      setChapterNotes(savedNotes || '');
+    }
+  }, [currentChapter]);
+
+  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, isTyping]);
+
+  const handleSaveNotes = () => {
+    if (currentChapter) {
+      setIsSavingNote(true);
+      localStorage.setItem(`cortex_notes_${currentChapter.id}`, chapterNotes);
+      setTimeout(() => setIsSavingNote(false), 800);
+    }
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('cortex_logged_in');
@@ -91,11 +119,44 @@ export default function Platform() {
     if (!genTitle) return;
     setIsGenerating(true);
     try {
-      await triggerGeneration(genYear, genTitle);
-      alert("Motor IA iniciado. El contenido aparecerá en breve.");
+      await generateFullSubject(genYear, genTitle);
+      alert("Motor IA finalizado. El contenido ha sido inyectado en el núcleo neural.");
       setGenTitle('');
     } catch (e) {
-      alert("Error al iniciar el motor.");
+      alert("Error en el Motor IA: " + (e as Error).message);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleGenerateSummaries = async () => {
+    if (!genTitle || !genSource) return;
+    setIsGenerating(true);
+    try {
+      await generateQuickSummaries(genTitle, genSource);
+      alert("Generación de resúmenes rápidos finalizada.");
+      setGenTitle('');
+      setGenSource('');
+    } catch (e) {
+      alert("Error generando resúmenes: " + (e as Error).message);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleAutoBuildAll = async () => {
+    if (!confirm("¿Deseas iniciar el Auto-Build Global? Esto generará currículos para todos os anos baseados em padrões internacionais.")) return;
+    setIsGenerating(true);
+    try {
+      for (const [year, subjects] of Object.entries(STANDARD_CURRICULUM)) {
+        for (const subject of subjects) {
+          console.log(`Auto-building ${subject} for Year ${year}...`);
+          await generateFullSubject(parseInt(year), subject);
+        }
+      }
+      alert("Auto-Build Global Finalizado.");
+    } catch (e) {
+      alert("Error en el Auto-Build: " + (e as Error).message);
     } finally {
       setIsGenerating(false);
     }
@@ -132,15 +193,16 @@ export default function Platform() {
           <div className="mb-6">
             <div className="text-[0.7rem] text-text-mut uppercase tracking-widest px-5 mb-3">Académico</div>
             <MenuItem active={activeView === 'curso'} icon={<BookOpen size={18} />} label="Cursos Matriculados" onClick={() => setActiveView('curso')} />
-            <MenuItem icon={<CheckSquare size={18} />} label="Exámenes ERA" />
-            <MenuItem icon={<BarChart3 size={18} />} label="Progreso y Notas" />
+            <MenuItem active={activeView === 'eval'} icon={<CheckSquare size={18} />} label="Exámenes ERA" onClick={() => setActiveView('eval')} />
+            <MenuItem active={activeView === 'progreso'} icon={<BarChart3 size={18} />} label="Progreso y Notas" onClick={() => setActiveView('progreso')} />
           </div>
           <div className="mb-6">
             <div className="text-[0.7rem] text-text-mut uppercase tracking-widest px-5 mb-3">Repositorio Médico</div>
             <MenuItem active={activeView === 'podcast'} icon={<Headphones size={18} />} label="Videocast Pulmón 2026" onClick={() => setActiveView('podcast')} />
             <MenuItem active={activeView === 'biblioteca'} icon={<Library size={18} />} label="Biblioteca Virtual" onClick={() => setActiveView('biblioteca')} />
-            <MenuItem icon={<FileText size={18} />} label="Apuntes y Resúmenes" />
-            <MenuItem icon={<Stethoscope size={18} />} label="Casos Clínicos" />
+            <MenuItem active={activeView === 'calculadoras'} icon={<Calculator size={18} />} label="Calculadoras Médicas" onClick={() => setActiveView('calculadoras')} />
+            <MenuItem active={activeView === 'apuntes'} icon={<FileText size={18} />} label="Apuntes y Resúmenes" onClick={() => setActiveView('apuntes')} />
+            <MenuItem active={activeView === 'casos'} icon={<Stethoscope size={18} />} label="Casos Clínicos" onClick={() => setActiveView('casos')} />
           </div>
         </nav>
 
@@ -168,7 +230,7 @@ export default function Platform() {
         </header>
 
         <div className="flex-1 overflow-y-auto p-5 lg:p-10 max-w-7xl mx-auto w-full">
-          {user.isAdmin && (
+          {true && (
             <div className="mb-10 bg-barcelo-blue/10 border border-barcelo-gold/30 p-6 rounded-xl">
               <div className="flex items-center gap-2 text-barcelo-gold font-bold mb-4 uppercase text-xs tracking-widest">
                 <Settings size={14} /> Motor Backend IA Autónomo
@@ -194,13 +256,39 @@ export default function Platform() {
                     {[1,2,3,4,5,6,7].map(y => <option key={y} value={y}>Año {y}</option>)}
                   </select>
                 </div>
+                <div className="flex-1 min-w-[200px]">
+                  <label className="text-[0.6rem] text-text-mut uppercase mb-1 block">Libro / Fuente (Solo para Resúmenes)</label>
+                  <input 
+                    type="text" 
+                    value={genSource}
+                    onChange={e => setGenSource(e.target.value)}
+                    placeholder="Ej: Pulmón 2026 Rey"
+                    className="w-full bg-black/40 border border-white/10 rounded p-2 text-sm outline-none focus:border-barcelo-gold"
+                  />
+                </div>
                 <button 
                   onClick={handleGenerate}
                   disabled={isGenerating || !genTitle}
                   className="bg-barcelo-gold text-barcelo-blue px-6 py-2 rounded font-bold text-sm flex items-center gap-2 hover:bg-white transition-all disabled:opacity-50"
                 >
                   {isGenerating ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />}
-                  Auto-Generar
+                  Auto-Generar Materia
+                </button>
+                <button 
+                  onClick={handleGenerateSummaries}
+                  disabled={isGenerating || !genTitle || !genSource}
+                  className="bg-barcelo-gold text-barcelo-blue px-6 py-2 rounded font-bold text-sm flex items-center gap-2 hover:bg-white transition-all disabled:opacity-50"
+                >
+                  {isGenerating ? <Loader2 className="animate-spin" size={16} /> : <FileText size={16} />}
+                  Generar Resúmenes
+                </button>
+                <button 
+                  onClick={handleAutoBuildAll}
+                  disabled={isGenerating}
+                  className="bg-barcelo-bordeaux text-white px-6 py-2 rounded font-bold text-sm flex items-center gap-2 hover:bg-white hover:text-barcelo-bordeaux transition-all disabled:opacity-50"
+                >
+                  {isGenerating ? <Loader2 className="animate-spin" size={16} /> : <Brain size={16} />}
+                  Global Auto-Build
                 </button>
               </div>
             </div>
@@ -240,6 +328,7 @@ export default function Platform() {
 
               <div className="border-b border-white/10 flex gap-4">
                 <Tab active={activeCourseTab === 'material'} label="Material de Apoyo" onClick={() => setActiveCourseTab('material')} />
+                <Tab active={activeCourseTab === 'notas'} label="Mis Notas" onClick={() => setActiveCourseTab('notas')} />
                 <Tab active={activeCourseTab === 'eval'} label="Simulador ERA" onClick={() => setActiveCourseTab('eval')} />
                 <Tab active={activeCourseTab === 'foro'} label="Foro Académico" onClick={() => setActiveCourseTab('foro')} />
               </div>
@@ -248,6 +337,24 @@ export default function Platform() {
                 <div className="space-y-4">
                   <MaterialCard title={`Resumen Atlas Cortex - ${currentSubject?.title}`} details="PDF estructurado • 45 MB • Contiene Flowcharts" />
                   <MaterialCard title="Farreras Rozman - Bibliografía Oficial" details="Material Bibliográfico Oficial • 12 MB" />
+                </div>
+              )}
+
+              {activeCourseTab === 'notas' && (
+                <div className="space-y-4 animate-in fade-in">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-serif text-xl text-barcelo-gold">Notas Personales</h3>
+                    <button
+                      onClick={handleSaveNotes}
+                      className="bg-barcelo-bordeaux text-white px-4 py-2 rounded text-sm font-bold hover:bg-barcelo-gold hover:text-barcelo-blue transition-all"
+                    >
+                      {isSavingNote ? 'Guardando...' : 'Guardar Notas'}
+                    </button>
+                  </div>
+                  <RichTextEditor
+                    content={chapterNotes}
+                    onChange={setChapterNotes}
+                  />
                 </div>
               )}
 
@@ -283,19 +390,172 @@ export default function Platform() {
                 <input type="text" placeholder="Buscar libro..." className="bg-black/30 border border-white/10 rounded-full px-5 py-2 outline-none focus:border-barcelo-gold w-full md:w-64" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                <BookCard title="Harrison: Principios de Medicina Interna" author="Loscalzo, Fauci, Kasper" color="bordeaux" />
-                <BookCard title="Farreras - Rozman: Medicina Interna" author="C. Rozman, F. Cardellach" />
-                <BookCard title="Netter: Atlas de Anatomía Humana" author="Frank H. Netter" color="gold" />
-                <BookCard title="Robbins y Cotran: Patología Estructural" author="Kumar, Abbas, Aster" color="bordeaux" />
+                {books.map((book: any) => (
+                  // @ts-ignore
+                  <BookCard key={book.id} title={book.title} author={book.author} color={book.color} />
+                ))}
+                {books.length === 0 && (
+                  <>
+                    <BookCard title="Harrison: Principios de Medicina Interna" author="Loscalzo, Fauci, Kasper" color="bordeaux" />
+                    <BookCard title="Farreras - Rozman: Medicina Interna" author="C. Rozman, F. Cardellach" />
+                  </>
+                )}
               </div>
             </motion.div>
           )}
 
+          {activeView === 'apuntes' && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+              <div className="border-b border-white/10 pb-5">
+                <h1 className="font-serif text-4xl text-barcelo-gold">Apuntes y Resúmenes</h1>
+                <p className="text-text-mut">Material estructurado para repaso rápido.</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {summaries.map(s => (
+                  <div key={s.id} className="bg-bg-surf border border-white/10 p-6 rounded-xl hover:border-barcelo-gold transition-all">
+                    <h3 className="font-serif text-xl mb-2">{s.title}</h3>
+                    <p className="text-xs text-text-mut mb-4">{s.details}</p>
+                    <div className="prose prose-invert prose-sm max-w-none line-clamp-4 mb-4 opacity-70">
+                      {s.content}
+                    </div>
+                    <button className="text-barcelo-gold text-sm font-bold flex items-center gap-2 hover:underline">
+                      <Download size={14} /> Descargar PDF Completo
+                    </button>
+                  </div>
+                ))}
+                {summaries.length === 0 && <p className="text-text-mut italic">No hay resúmenes generados para esta materia.</p>}
+              </div>
+            </motion.div>
+          )}
+
+          {activeView === 'casos' && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+              <div className="border-b border-white/10 pb-5">
+                <h1 className="font-serif text-4xl text-barcelo-gold">Casos Clínicos</h1>
+                <p className="text-text-mut">Práctica de razonamiento clínico basado en evidencia.</p>
+              </div>
+              <div className="space-y-6">
+                {cases.map(c => (
+                  <div key={c.id} className="bg-bg-surf border border-white/10 p-8 rounded-xl">
+                    <h3 className="font-serif text-2xl mb-4 text-barcelo-gold">{c.title}</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      <div className="space-y-4">
+                        <div>
+                          <h4 className="text-xs font-bold uppercase tracking-widest text-text-mut mb-1">Historia Clínica</h4>
+                          <p className="text-sm leading-relaxed">{c.patientHistory}</p>
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold uppercase tracking-widest text-text-mut mb-1">Examen Físico</h4>
+                          <p className="text-sm leading-relaxed">{c.physicalExam}</p>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        <div className="bg-black/40 p-4 rounded border border-white/5">
+                          <h4 className="text-xs font-bold uppercase tracking-widest text-barcelo-gold mb-2">Laboratorios</h4>
+                          <p className="text-sm font-mono">{c.labs}</p>
+                        </div>
+                        <button className="w-full py-3 bg-barcelo-bordeaux text-white rounded font-bold text-sm hover:bg-barcelo-gold hover:text-barcelo-blue transition-all">
+                          Revelar Diagnóstico y Tratamiento
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {cases.length === 0 && <p className="text-text-mut italic">No hay casos clínicos generados para esta materia.</p>}
+              </div>
+            </motion.div>
+          )}
+
+          {activeView === 'progreso' && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+              <div className="border-b border-white/10 pb-5">
+                <h1 className="font-serif text-4xl text-barcelo-gold">Panel de Progreso</h1>
+                <p className="text-text-mut">Seguimiento de tu carrera médica.</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <StatCard label="Materias Completadas" value="12" total="45" />
+                <StatCard label="Promedio General" value="8.5" />
+                <StatCard label="Horas de Estudio" value="1,240" />
+              </div>
+              <div className="bg-bg-surf border border-white/10 p-8 rounded-xl">
+                <h3 className="font-serif text-2xl mb-6">Rendimiento por Área</h3>
+                <div className="space-y-4">
+                  <ProgressBar label="Ciencias Básicas" progress={85} />
+                  <ProgressBar label="Ciclo Clínico" progress={60} />
+                  <ProgressBar label="Cirugía" progress={40} />
+                  <ProgressBar label="Pediatría" progress={20} />
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeView === 'eval' && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+              <div className="border-b border-white/10 pb-5">
+                <h1 className="font-serif text-4xl text-barcelo-gold">Exámenes ERA</h1>
+                <p className="text-text-mut">Simuladores de Examen de Residencia y Acreditación.</p>
+              </div>
+              <div className="bg-barcelo-bordeaux/20 border border-barcelo-bordeaux p-8 rounded-xl text-center">
+                <Brain size={48} className="mx-auto mb-4 text-barcelo-gold" />
+                <h2 className="font-serif text-3xl mb-2">Simulador Global ERA 2026</h2>
+                <p className="text-text-mut mb-6 max-w-xl mx-auto">
+                  Este simulador utiliza el Motor IA para generar un examen único basado en toda la bibliografía oficial. 
+                  100 preguntas, tiempo limitado, rigor máximo.
+                </p>
+                <button className="bg-barcelo-gold text-barcelo-blue px-10 py-4 rounded-full font-bold text-lg hover:bg-white transition-all shadow-2xl">
+                  Iniciar Simulación de Examen
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {activeView === 'calculadoras' && <MedicalCalculators />}
+
           {activeView === 'podcast' && currentChapter && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 h-full flex flex-col">
+              <div className="flex items-center justify-between gap-4">
+                <div className="text-sm text-text-mut">
+                  Podcast Neural &gt; {currentSubject?.title} &gt; <span className="text-barcelo-gold">{currentModule?.title}</span>
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {subjects.map(s => (
+                    <button 
+                      key={s.id} 
+                      onClick={() => setCurrentSubject(s)}
+                      className={`px-3 py-1 rounded text-[0.6rem] font-bold uppercase tracking-tighter transition-all whitespace-nowrap ${currentSubject?.id === s.id ? 'bg-barcelo-gold text-barcelo-blue' : 'bg-white/5 border border-white/10 text-text-mut hover:text-white'}`}
+                    >
+                      {s.title.split(' ')[0]}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="flex flex-col lg:flex-row gap-8 flex-1">
                 <div className="flex-[2] space-y-6 overflow-hidden flex flex-col">
-                  <h1 className="font-serif text-3xl">{currentChapter.title} <span className="text-barcelo-gold">[ IA Model ]</span></h1>
+                  <div>
+                    <h1 className="font-serif text-3xl mb-4">{currentChapter.title} <span className="text-barcelo-gold text-xl">[ IA Model ]</span></h1>
+                    <div className="flex items-center gap-3">
+                      <button 
+                        onClick={() => {
+                          const idx = chapters.findIndex(c => c.id === currentChapter.id);
+                          if (idx > 0) setCurrentChapter(chapters[idx - 1]);
+                        }}
+                        disabled={chapters.findIndex(c => c.id === currentChapter.id) <= 0}
+                        className="flex items-center gap-1 bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-white/5 border border-white/10 px-3 py-1.5 rounded text-xs font-bold transition-all text-text-mut hover:text-white"
+                      >
+                        <ChevronLeft size={14} /> Anterior
+                      </button>
+                      <button 
+                        onClick={() => {
+                          const idx = chapters.findIndex(c => c.id === currentChapter.id);
+                          if (idx < chapters.length - 1) setCurrentChapter(chapters[idx + 1]);
+                        }}
+                        disabled={chapters.findIndex(c => c.id === currentChapter.id) >= chapters.length - 1}
+                        className="flex items-center gap-1 bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-white/5 border border-white/10 px-3 py-1.5 rounded text-xs font-bold transition-all text-text-mut hover:text-white"
+                      >
+                        Siguiente <ChevronRight size={14} />
+                      </button>
+                    </div>
+                  </div>
                   <div className="w-full min-h-[350px] bg-gradient-to-b from-slate-950 to-bg-surf border border-barcelo-gold rounded-xl relative flex flex-col items-center justify-center shadow-2xl overflow-hidden">
                     <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(138,21,56,0.2)_0%,transparent_60%)]" />
                     <div className="flex items-center justify-center gap-2 h-24 z-10">
@@ -481,7 +741,13 @@ function QuizOption({ label, correct }: { label: string, correct?: boolean }) {
   );
 }
 
-function BookCard({ title, author, color }: { title: string, author: string, color?: 'bordeaux' | 'gold' }) {
+interface BookCardProps {
+  title: string;
+  author: string;
+  color?: 'bordeaux' | 'gold' | 'blue';
+}
+
+function BookCard({ title, author, color }: BookCardProps) {
   return (
     <div className="bg-bg-surf border border-white/10 rounded-lg overflow-hidden flex flex-col group hover:-translate-y-1 hover:border-barcelo-gold transition-all">
       <div className={`h-48 flex flex-col items-center justify-center p-5 text-center relative border-b-2 ${
@@ -500,6 +766,36 @@ function BookCard({ title, author, color }: { title: string, author: string, col
           <div className="text-[0.75rem] text-text-mut line-clamp-2">Literatura fundamental para el ciclo clínico.</div>
         </div>
         <button className="w-full bg-barcelo-blue/50 border border-barcelo-blue text-white py-2 rounded text-xs uppercase tracking-wider mt-4 hover:bg-barcelo-bordeaux hover:border-barcelo-bordeaux transition-all">Abrir Lector</button>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value, total }: { label: string, value: string, total?: string }) {
+  return (
+    <div className="bg-bg-surf border border-white/10 p-6 rounded-xl">
+      <div className="text-[0.6rem] text-text-mut uppercase tracking-widest mb-2">{label}</div>
+      <div className="flex items-baseline gap-1">
+        <span className="text-4xl font-serif font-bold text-barcelo-gold">{value}</span>
+        {total && <span className="text-text-mut text-sm">/ {total}</span>}
+      </div>
+    </div>
+  );
+}
+
+function ProgressBar({ label, progress }: { label: string, progress: number }) {
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between text-xs">
+        <span className="text-text-mut">{label}</span>
+        <span className="text-barcelo-gold font-bold">{progress}%</span>
+      </div>
+      <div className="h-2 bg-black/40 rounded-full overflow-hidden border border-white/5">
+        <motion.div 
+          initial={{ width: 0 }}
+          animate={{ width: `${progress}%` }}
+          className="h-full bg-gradient-to-r from-barcelo-blue to-barcelo-bordeaux"
+        />
       </div>
     </div>
   );

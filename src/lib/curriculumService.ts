@@ -22,11 +22,20 @@ export async function getChapters(subjectId: string, moduleId: string): Promise<
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Chapter));
 }
 
-export async function triggerGeneration(year: number, subjectTitle: string) {
-  const response = await fetch("/api/admin/generate-curriculum", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ year, subjectTitle })
-  });
-  return response.json();
+export async function getBooks(subjectId: string): Promise<any[]> {
+  const q = query(collection(db, `subjects/${subjectId}/books`), orderBy("order"));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+
+export async function getSummaries(subjectId: string): Promise<any[]> {
+  const q = query(collection(db, `subjects/${subjectId}/summaries`), orderBy("order"));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+
+export async function getCases(subjectId: string): Promise<any[]> {
+  const q = query(collection(db, `subjects/${subjectId}/cases`), orderBy("order"));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 }
