@@ -1,0 +1,104 @@
+{
+  "entities": {
+    "Subject": {
+      "title": "Subject",
+      "description": "A medical subject (e.g., Anatomy, Cardiology)",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "order": { "type": "number" },
+        "year": { "type": "number", "description": "1 to 7" }
+      },
+      "required": ["title", "year"]
+    },
+    "Module": {
+      "title": "Module",
+      "description": "A module within a subject",
+      "type": "object",
+      "properties": {
+        "subjectId": { "type": "string" },
+        "title": { "type": "string" },
+        "order": { "type": "number" }
+      },
+      "required": ["subjectId", "title"]
+    },
+    "Chapter": {
+      "title": "Chapter",
+      "description": "A chapter with content and quiz",
+      "type": "object",
+      "properties": {
+        "moduleId": { "type": "string" },
+        "title": { "type": "string" },
+        "duration": { "type": "string" },
+        "transcript": { "type": "string" },
+        "quiz": {
+          "type": "object",
+          "properties": {
+            "question": { "type": "string" },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "text": { "type": "string" },
+                  "isCorrect": { "type": "boolean" },
+                  "feedback": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "order": { "type": "number" }
+      },
+      "required": ["moduleId", "title", "transcript"]
+    },
+    "Material": {
+      "title": "Material",
+      "description": "Study material like PDFs",
+      "type": "object",
+      "properties": {
+        "chapterId": { "type": "string" },
+        "title": { "type": "string" },
+        "type": { "type": "string", "enum": ["pdf", "link", "video"] },
+        "url": { "type": "string" },
+        "details": { "type": "string" }
+      },
+      "required": ["chapterId", "title", "url"]
+    },
+    "UserProgress": {
+      "title": "UserProgress",
+      "description": "Tracking user completion",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "chapterId": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "lastAccessed": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "chapterId"]
+    }
+  },
+  "firestore": {
+    "/subjects/{subjectId}": {
+      "schema": "Subject",
+      "description": "Collection of medical subjects"
+    },
+    "/subjects/{subjectId}/modules/{moduleId}": {
+      "schema": "Module",
+      "description": "Modules within a subject"
+    },
+    "/subjects/{subjectId}/modules/{moduleId}/chapters/{chapterId}": {
+      "schema": "Chapter",
+      "description": "Chapters within a module"
+    },
+    "/materials/{materialId}": {
+      "schema": "Material",
+      "description": "Global materials collection"
+    },
+    "/user_progress/{progressId}": {
+      "schema": "UserProgress",
+      "description": "User progress tracking"
+    }
+  }
+}

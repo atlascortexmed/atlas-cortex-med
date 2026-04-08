@@ -1,0 +1,64 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Subject: { title: string, year: number, order: number }
+    // Module: { subjectId: string, title: string, order: number }
+    // Chapter: { moduleId: string, title: string, transcript: string, quiz: object, order: number }
+    // Material: { chapterId: string, title: string, url: string, type: string }
+    // UserProgress: { userId: string, chapterId: string, completed: bool }
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "atlascortexmed@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /subjects/{subjectId} {
+      allow read: if true; // Publicly readable for students
+      allow write: if isAdmin();
+      
+      match /modules/{moduleId} {
+        allow read: if true;
+        allow write: if isAdmin();
+        
+        match /chapters/{chapterId} {
+          allow read: if true;
+          allow write: if isAdmin();
+        }
+      }
+    }
+
+    match /materials/{materialId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /user_progress/{progressId} {
+      allow read, write: if isOwner(request.resource.data.userId || resource.data.userId);
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+  }
+}
