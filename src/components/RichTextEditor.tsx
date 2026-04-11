@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import { Bold, Italic, List, ListOrdered } from 'lucide-react';
+import { Bold, Italic, List, ListOrdered, Sparkles, Loader2 } from 'lucide-react';
+import { getCortexResponse } from '../lib/gemini';
 
 interface RichTextEditorProps {
   content: string;
@@ -9,12 +10,35 @@ interface RichTextEditorProps {
 }
 
 const MenuBar = ({ editor }: { editor: any }) => {
+  const [isAiLoading, setIsAiLoading] = useState(false);
+
   if (!editor) {
     return null;
   }
 
+  const handleAiImprove = async () => {
+    const currentText = editor.getText();
+    if (!currentText.trim()) return;
+
+    setIsAiLoading(true);
+    try {
+      const prompt = `Mejora el siguiente texto médico, corrigiendo gramática, dándole un tono más profesional y estructurándolo mejor si es necesario. Devuelve SOLO el texto mejorado en formato HTML (puedes usar <b>, <i>, <ul>, <li>, etc.).\n\nTexto original:\n${currentText}`;
+      const response = await getCortexResponse(prompt, 'strict', 'fast');
+      
+      // Clean up potential markdown code blocks from the response
+      const cleanHtml = response.replace(/```html/g, '').replace(/```/g, '').trim();
+      
+      editor.commands.setContent(cleanHtml);
+    } catch (error) {
+      console.error("AI Improve Error:", error);
+      alert("Error al mejorar el texto con IA.");
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
   return (
-    <div className="flex flex-wrap gap-2 p-2 border-b border-white/10 bg-black/50 rounded-t-lg">
+    <div className="flex flex-wrap gap-2 p-2 border-b border-white/10 bg-black/50 rounded-t-lg items-center">
       <button
         onClick={() => editor.chain().focus().toggleBold().run()}
         disabled={!editor.can().chain().focus().toggleBold().run()}
@@ -45,6 +69,18 @@ const MenuBar = ({ editor }: { editor: any }) => {
         title="Lista numerada"
       >
         <ListOrdered size={16} />
+      </button>
+      
+      <div className="flex-1" />
+      
+      <button
+        onClick={handleAiImprove}
+        disabled={isAiLoading || editor.isEmpty}
+        className="flex items-center gap-2 px-3 py-1.5 rounded bg-barcelo-blue/30 border border-barcelo-blue text-white text-xs font-bold hover:bg-barcelo-blue transition-all disabled:opacity-50"
+        title="Mejorar con IA (Rápido)"
+      >
+        {isAiLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} className="text-barcelo-gold" />}
+        Mejorar con IA
       </button>
     </div>
   );

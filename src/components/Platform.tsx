@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   BookOpen, CheckSquare, BarChart3, Headphones, Library, FileText, 
   Stethoscope, LogOut, Menu, X, Play, Download, Send, Brain, Settings, Plus, Loader2,
-  Calculator, ChevronLeft, ChevronRight
+  Calculator, ChevronLeft, ChevronRight, Search, Image as ImageIcon
 } from 'lucide-react';
 import { getCortexResponse } from '../lib/gemini';
 import { 
@@ -15,6 +15,8 @@ import { generateFullSubject, generateQuickSummaries, STANDARD_CURRICULUM } from
 import { Subject, Module, Chapter, Book, Summary, ClinicalCase } from '../types';
 import MedicalCalculators from './Calculators';
 import RichTextEditor from './RichTextEditor';
+import { auth, db } from '../lib/firebase';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 export default function Platform() {
   const navigate = useNavigate();
@@ -23,7 +25,10 @@ export default function Platform() {
   const [activeCourseTab, setActiveCourseTab] = useState<'material' | 'eval' | 'foro' | 'notas'>('material');
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [aiMode, setAiMode] = useState<'strict' | 'unfiltered'>('strict');
-  const [chatMessages, setChatMessages] = useState<{role: 'bot' | 'user', text: string}[]>([
+  const [taskType, setTaskType] = useState<'complex' | 'general' | 'fast'>('complex');
+  const [useSearch, setUseSearch] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<{ data: string, mimeType: string } | null>(null);
+  const [chatMessages, setChatMessages] = useState<{role: 'bot' | 'user', text: string, image?: string}[]>([
     { role: 'bot', text: 'Bienvenido a la red. Soy Cortex AI, tu tutor entrenado sobre la base bibliográfica de Farreras-Rozman. ¿Qué duda discutimos hoy?' }
   ]);
   const [aiInput, setAiInput] = useState('');
@@ -51,17 +56,25 @@ export default function Platform() {
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const user = {
+  const [user, setUser] = useState({
     name: localStorage.getItem('cortex_name') || 'Alumno',
     email: localStorage.getItem('cortex_email') || 'alumno@barcelo.edu.ar',
     isAdmin: localStorage.getItem('cortex_email') === 'atlascortexmed@gmail.com'
-  };
+  });
 
   useEffect(() => {
-    if (localStorage.getItem('cortex_logged_in') !== 'true') {
-      navigate('/');
-    }
-    
+    const unsubscribeAuth = auth.onAuthStateChanged((firebaseUser) => {
+      if (firebaseUser) {
+        setUser({
+          name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Alumno',
+          email: firebaseUser.email || 'alumno@barcelo.edu.ar',
+          isAdmin: firebaseUser.email === 'atlascortexmed@gmail.com'
+        });
+      } else if (localStorage.getItem('cortex_logged_in') !== 'true') {
+        navigate('/');
+      }
+    });
+
     const unsubscribe = subscribeToSubjects((data) => {
       setSubjects(data);
       if (data.length > 0 && !currentSubject) {
@@ -70,7 +83,10 @@ export default function Platform() {
       setIsLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+      unsubscribe();
+    };
   }, [navigate]);
 
   useEffect(() => {
@@ -92,26 +108,54 @@ export default function Platform() {
   }, [currentSubject, currentModule]);
 
   useEffect(() => {
-    if (currentChapter) {
-      const savedNotes = localStorage.getItem(`cortex_notes_${currentChapter.id}`);
-      setChapterNotes(savedNotes || '');
-    }
+    const loadNotes = async () => {
+      if (currentChapter && auth.currentUser) {
+        try {
+          const noteDoc = await getDoc(doc(db, 'user_notes', `${auth.currentUser.uid}_${currentChapter.id}`));
+          if (noteDoc.exists()) {
+            setChapterNotes(noteDoc.data().content || '');
+          } else {
+            setChapterNotes('');
+          }
+        } catch (e) {
+          console.error("Error loading notes:", e);
+        }
+      }
+    };
+    loadNotes();
   }, [currentChapter]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, isTyping]);
 
-  const handleSaveNotes = () => {
-    if (currentChapter) {
+  const handleSaveNotes = async () => {
+    if (currentChapter && auth.currentUser) {
       setIsSavingNote(true);
-      localStorage.setItem(`cortex_notes_${currentChapter.id}`, chapterNotes);
-      setTimeout(() => setIsSavingNote(false), 800);
+      try {
+        await setDoc(doc(db, 'user_notes', `${auth.currentUser.uid}_${currentChapter.id}`), {
+          userId: auth.currentUser.uid,
+          chapterId: currentChapter.id,
+          content: chapterNotes,
+          updatedAt: new Date()
+        });
+      } catch (e) {
+        console.error("Error saving notes:", e);
+      } finally {
+        setTimeout(() => setIsSavingNote(false), 800);
+      }
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await auth.signOut();
+    } catch (e) {
+      console.error(e);
+    }
     localStorage.removeItem('cortex_logged_in');
+    localStorage.removeItem('cortex_name');
+    localStorage.removeItem('cortex_email');
     navigate('/');
   };
 
@@ -163,15 +207,33 @@ export default function Platform() {
   };
 
   const sendAIMessage = async () => {
-    if (!aiInput.trim()) return;
+    if (!aiInput.trim() && !selectedImage) return;
     const userMsg = aiInput;
+    const currentImage = selectedImage;
     setAiInput('');
-    setChatMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+    setSelectedImage(null);
+    setChatMessages(prev => [...prev, { 
+      role: 'user', 
+      text: userMsg, 
+      image: currentImage ? `data:${currentImage.mimeType};base64,${currentImage.data}` : undefined 
+    }]);
     setIsTyping(true);
 
-    const response = await getCortexResponse(userMsg, aiMode);
+    const response = await getCortexResponse(userMsg, aiMode, taskType, currentImage || undefined, useSearch);
     setIsTyping(false);
     setChatMessages(prev => [...prev, { role: 'bot', text: response }]);
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = (reader.result as string).split(',')[1];
+        setSelectedImage({ data: base64String, mimeType: file.type });
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   return (
@@ -640,6 +702,38 @@ export default function Platform() {
                       X-OMEGA (SIN FILTRO)
                     </button>
                   </div>
+                  <div className="flex bg-black/40 rounded-full p-1 border border-white/10 mt-1">
+                    <button 
+                      onClick={() => setTaskType('fast')}
+                      className={`flex-1 py-1 text-[0.6rem] font-bold rounded-full transition-all ${taskType === 'fast' ? 'bg-white/20 text-white' : 'text-text-mut'}`}
+                    >
+                      RÁPIDO (LITE)
+                    </button>
+                    <button 
+                      onClick={() => setTaskType('general')}
+                      className={`flex-1 py-1 text-[0.6rem] font-bold rounded-full transition-all ${taskType === 'general' ? 'bg-white/20 text-white' : 'text-text-mut'}`}
+                    >
+                      NORMAL (FLASH)
+                    </button>
+                    <button 
+                      onClick={() => setTaskType('complex')}
+                      className={`flex-1 py-1 text-[0.6rem] font-bold rounded-full transition-all ${taskType === 'complex' ? 'bg-white/20 text-white' : 'text-text-mut'}`}
+                    >
+                      COMPLEJO (PRO)
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between px-2 mt-1">
+                    <span className="text-[0.6rem] text-text-mut uppercase font-bold tracking-widest">Búsqueda Google</span>
+                    <button 
+                      onClick={() => setUseSearch(!useSearch)}
+                      className={`w-8 h-4 rounded-full relative transition-all ${useSearch ? 'bg-barcelo-gold' : 'bg-white/10'}`}
+                    >
+                      <motion.div 
+                        animate={{ x: useSearch ? 16 : 2 }}
+                        className="absolute top-0.5 w-3 h-3 bg-white rounded-full shadow-sm"
+                      />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-5 space-y-4">
@@ -649,6 +743,9 @@ export default function Platform() {
                         {msg.role === 'bot' ? 'C' : 'U'}
                       </div>
                       <div className={`p-3 rounded-xl text-sm leading-relaxed border ${msg.role === 'bot' ? 'bg-white/5 border-white/10 rounded-tl-none' : 'bg-barcelo-blue/40 border-barcelo-blue rounded-tr-none'}`}>
+                        {msg.image && (
+                          <img src={msg.image} alt="Upload" className="max-w-full h-auto rounded-lg mb-2 border border-white/10" />
+                        )}
                         {msg.text}
                       </div>
                     </div>
@@ -666,18 +763,39 @@ export default function Platform() {
                   <div ref={chatEndRef} />
                 </div>
 
-                <div className="p-4 bg-black/50 border-t border-white/10 flex gap-2">
-                  <input 
-                    type="text" 
-                    value={aiInput}
-                    onChange={e => setAiInput(e.target.value)}
-                    onKeyPress={e => e.key === 'Enter' && sendAIMessage()}
-                    placeholder="Haz tu consulta médica..."
-                    className="flex-1 bg-white/5 border border-white/10 rounded-full px-4 py-2 text-sm outline-none focus:border-barcelo-gold transition-all"
-                  />
-                  <button onClick={sendAIMessage} className="bg-barcelo-bordeaux text-white w-10 h-10 rounded-full flex items-center justify-center hover:bg-barcelo-gold hover:text-black transition-all">
-                    <Send size={18} />
-                  </button>
+                <div className="p-4 bg-black/50 border-t border-white/10 flex flex-col gap-3">
+                  {selectedImage && (
+                    <div className="relative w-20 h-20 group">
+                      <img 
+                        src={`data:${selectedImage.mimeType};base64,${selectedImage.data}`} 
+                        alt="Preview" 
+                        className="w-full h-full object-cover rounded-lg border border-barcelo-gold" 
+                      />
+                      <button 
+                        onClick={() => setSelectedImage(null)}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <label className="bg-white/5 border border-white/10 text-text-mut w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 cursor-pointer transition-all">
+                      <ImageIcon size={18} />
+                      <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                    </label>
+                    <input 
+                      type="text" 
+                      value={aiInput}
+                      onChange={e => setAiInput(e.target.value)}
+                      onKeyPress={e => e.key === 'Enter' && sendAIMessage()}
+                      placeholder={useSearch ? "Buscando en Google..." : "Haz tu consulta médica..."}
+                      className="flex-1 bg-white/5 border border-white/10 rounded-full px-4 py-2 text-sm outline-none focus:border-barcelo-gold transition-all"
+                    />
+                    <button onClick={sendAIMessage} className="bg-barcelo-bordeaux text-white w-10 h-10 rounded-full flex items-center justify-center hover:bg-barcelo-gold hover:text-black transition-all">
+                      <Send size={18} />
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             )}
