@@ -32,3 +32,19 @@ body {
                     linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px);
   background-size: 30px 30px;
 }
+
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}

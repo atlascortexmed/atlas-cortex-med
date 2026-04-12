@@ -75,17 +75,39 @@ export async function generateFullSubject(year: number, subjectTitle: string) {
 
     const data = JSON.parse(result.text || "{}");
 
-    // Save to Firestore
+    // Clinical Audit Step
+    console.log(`[AI MOTOR] Auditing clinical accuracy for ${subjectTitle}...`);
+    const auditPrompt = `
+      Revisa el siguiente contenido médico generado para la materia "${subjectTitle}".
+      Busca posibles errores en dosis, criterios diagnósticos o algoritmos (basado en GINA/GOLD 2026).
+      Si encuentras errores, corrígelos directamente en el contenido.
+      Contenido: ${JSON.stringify(data)}
+      Devuelve el JSON corregido y final.
+    `;
+
+    const auditResult = await ai.models.generateContent({
+      model: "gemini-3.1-pro-preview",
+      contents: [{ role: "user", parts: [{ text: auditPrompt }] }],
+      config: {
+        systemInstruction: "Eres el Auditor Clínico Senior de Atlas Cortex. Tu misión es la precisión absoluta.",
+        responseMimeType: "application/json",
+        thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH }
+      }
+    });
+
+    const finalData = JSON.parse(auditResult.text || JSON.stringify(data));
+
+    // Save to Firestore using finalData
     const subjectRef = await addDoc(collection(db, "subjects"), {
       title: subjectTitle,
-      subtitle: data.subtitle || "",
+      subtitle: finalData.subtitle || "",
       year: year,
       order: Date.now(),
       createdAt: serverTimestamp()
     });
 
     // Save Modules and Chapters
-    for (const [mIndex, mod] of data.modules.entries()) {
+    for (const [mIndex, mod] of finalData.modules.entries()) {
       const modRef = await addDoc(collection(db, `subjects/${subjectRef.id}/modules`), {
         title: mod.title,
         order: mIndex
@@ -103,8 +125,8 @@ export async function generateFullSubject(year: number, subjectTitle: string) {
     }
 
     // Save Books
-    if (data.books) {
-      for (const [bIndex, book] of data.books.entries()) {
+    if (finalData.books) {
+      for (const [bIndex, book] of finalData.books.entries()) {
         await addDoc(collection(db, `subjects/${subjectRef.id}/books`), {
           ...book,
           order: bIndex
@@ -113,8 +135,8 @@ export async function generateFullSubject(year: number, subjectTitle: string) {
     }
 
     // Save Summaries
-    if (data.summaries) {
-      for (const [sIndex, summary] of data.summaries.entries()) {
+    if (finalData.summaries) {
+      for (const [sIndex, summary] of finalData.summaries.entries()) {
         await addDoc(collection(db, `subjects/${subjectRef.id}/summaries`), {
           ...summary,
           order: sIndex
@@ -123,8 +145,8 @@ export async function generateFullSubject(year: number, subjectTitle: string) {
     }
 
     // Save Cases
-    if (data.cases) {
-      for (const [caIndex, cCase] of data.cases.entries()) {
+    if (finalData.cases) {
+      for (const [caIndex, cCase] of finalData.cases.entries()) {
         await addDoc(collection(db, `subjects/${subjectRef.id}/cases`), {
           ...cCase,
           order: caIndex

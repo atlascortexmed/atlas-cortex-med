@@ -68,3 +68,39 @@ export async function getCortexResponse(
     return "Error de conexión con el núcleo neural. Intente nuevamente.";
   }
 }
+
+export async function generateFlashcards(content: string) {
+  try {
+    const ai = getAiClient();
+    const modelName = "gemini-3-flash-preview";
+    
+    const prompt = `
+      Basado en el siguiente contenido médico, genera una colección de flashcards (mínimo 5 y máximo 10).
+      Cada flashcard debe tener una pregunta clara y una respuesta concisa y rigurosa.
+      Devuelve los datos estrictamente en formato JSON:
+      {
+        "flashcards": [
+          { "front": "Pregunta", "back": "Respuesta" }
+        ]
+      }
+      
+      Contenido:
+      ${content}
+    `;
+
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        systemInstruction: "Eres el Motor de Memorización de Atlas Cortex. Tu tarea es extraer conceptos clave y convertirlos en flashcards efectivas.",
+        responseMimeType: "application/json"
+      }
+    });
+
+    const data = JSON.parse(response.text || "{}");
+    return data.flashcards || [];
+  } catch (error) {
+    console.error("Flashcard Generation Error:", error);
+    throw error;
+  }
+}

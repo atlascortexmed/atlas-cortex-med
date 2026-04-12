@@ -4,9 +4,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   BookOpen, CheckSquare, BarChart3, Headphones, Library, FileText, 
   Stethoscope, LogOut, Menu, X, Play, Download, Send, Brain, Settings, Plus, Loader2,
-  Calculator, ChevronLeft, ChevronRight, Search, Image as ImageIcon
+  Calculator, ChevronLeft, ChevronRight, Search, Image as ImageIcon, Layers
 } from 'lucide-react';
-import { getCortexResponse } from '../lib/gemini';
+import { getCortexResponse, generateFlashcards } from '../lib/gemini';
 import { 
   subscribeToSubjects, getModules, getChapters, 
   getBooks, getSummaries, getCases 
@@ -53,6 +53,11 @@ export default function Platform() {
   const [genYear, setGenYear] = useState(1);
   const [genTitle, setGenTitle] = useState('');
   const [genSource, setGenSource] = useState('');
+  const [genStatus, setGenStatus] = useState('');
+  const [flashcards, setFlashcards] = useState<{front: string, back: string}[]>([]);
+  const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false);
+  const [currentFlashcardIndex, setCurrentFlashcardIndex] = useState(0);
+  const [isFlashcardFlipped, setIsFlashcardFlipped] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -162,11 +167,14 @@ export default function Platform() {
   const handleGenerate = async () => {
     if (!genTitle) return;
     setIsGenerating(true);
+    setGenStatus('Iniciando Motor IA: Generando currículo...');
     try {
       await generateFullSubject(genYear, genTitle);
-      alert("Motor IA finalizado. El contenido ha sido inyectado en el núcleo neural.");
+      setGenStatus('Finalizado: Contenido inyectado y auditado.');
+      setTimeout(() => setGenStatus(''), 5000);
       setGenTitle('');
     } catch (e) {
+      setGenStatus('Error en la generación.');
       alert("Error en el Motor IA: " + (e as Error).message);
     } finally {
       setIsGenerating(false);
@@ -224,6 +232,21 @@ export default function Platform() {
     setChatMessages(prev => [...prev, { role: 'bot', text: response }]);
   };
 
+  const handleGenerateFlashcards = async () => {
+    if (!currentChapter) return;
+    setIsGeneratingFlashcards(true);
+    try {
+      const cards = await generateFlashcards(currentChapter.transcript);
+      setFlashcards(cards);
+      setCurrentFlashcardIndex(0);
+      setIsFlashcardFlipped(false);
+    } catch (e) {
+      alert("Error al generar flashcards: " + (e as Error).message);
+    } finally {
+      setIsGeneratingFlashcards(false);
+    }
+  };
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -264,6 +287,7 @@ export default function Platform() {
             <MenuItem active={activeView === 'biblioteca'} icon={<Library size={18} />} label="Biblioteca Virtual" onClick={() => setActiveView('biblioteca')} />
             <MenuItem active={activeView === 'calculadoras'} icon={<Calculator size={18} />} label="Calculadoras Médicas" onClick={() => setActiveView('calculadoras')} />
             <MenuItem active={activeView === 'apuntes'} icon={<FileText size={18} />} label="Apuntes y Resúmenes" onClick={() => setActiveView('apuntes')} />
+            <MenuItem active={activeView === 'flashcards'} icon={<Layers size={18} />} label="Flashcards IA" onClick={() => setActiveView('flashcards')} />
             <MenuItem active={activeView === 'casos'} icon={<Stethoscope size={18} />} label="Casos Clínicos" onClick={() => setActiveView('casos')} />
           </div>
         </nav>
@@ -294,8 +318,19 @@ export default function Platform() {
         <div className="flex-1 overflow-y-auto p-5 lg:p-10 max-w-7xl mx-auto w-full">
           {true && (
             <div className="mb-10 bg-barcelo-blue/10 border border-barcelo-gold/30 p-6 rounded-xl">
-              <div className="flex items-center gap-2 text-barcelo-gold font-bold mb-4 uppercase text-xs tracking-widest">
-                <Settings size={14} /> Motor Backend IA Autónomo
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2 text-barcelo-gold font-bold uppercase text-xs tracking-widest">
+                  <Settings size={14} /> Motor Backend IA Autónomo
+                </div>
+                {genStatus && (
+                  <motion.div 
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="text-[0.65rem] text-barcelo-gold bg-barcelo-gold/10 px-3 py-1 rounded border border-barcelo-gold/30 flex items-center gap-2"
+                  >
+                    <Loader2 className="animate-spin" size={10} /> {genStatus}
+                  </motion.div>
+                )}
               </div>
               <div className="flex flex-wrap gap-4 items-end">
                 <div className="flex-1 min-w-[200px]">
@@ -551,6 +586,134 @@ export default function Platform() {
             </motion.div>
           )}
 
+          {activeView === 'flashcards' && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+              <div className="border-b border-white/10 pb-5">
+                <h1 className="font-serif text-4xl text-barcelo-gold">Flashcards IA</h1>
+                <p className="text-text-mut">Memorización activa potenciada por inteligencia artificial.</p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-1 space-y-6">
+                  <div className="bg-bg-surf border border-white/10 p-6 rounded-xl">
+                    <h3 className="font-serif text-xl mb-4">Seleccionar Contenido</h3>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-[0.6rem] text-text-mut uppercase mb-1 block">Materia</label>
+                        <select 
+                          value={currentSubject?.id || ''} 
+                          onChange={(e) => {
+                            const sub = subjects.find(s => s.id === e.target.value);
+                            if (sub) setCurrentSubject(sub);
+                          }}
+                          className="w-full bg-black/40 border border-white/10 rounded p-2 text-sm outline-none focus:border-barcelo-gold"
+                        >
+                          {subjects.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[0.6rem] text-text-mut uppercase mb-1 block">Módulo</label>
+                        <select 
+                          value={currentModule?.id || ''} 
+                          onChange={(e) => {
+                            const mod = modules.find(m => m.id === e.target.value);
+                            if (mod) setCurrentModule(mod);
+                          }}
+                          className="w-full bg-black/40 border border-white/10 rounded p-2 text-sm outline-none focus:border-barcelo-gold"
+                        >
+                          {modules.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[0.6rem] text-text-mut uppercase mb-1 block">Capítulo</label>
+                        <select 
+                          value={currentChapter?.id || ''} 
+                          onChange={(e) => {
+                            const chap = chapters.find(c => c.id === e.target.value);
+                            if (chap) setCurrentChapter(chap);
+                          }}
+                          className="w-full bg-black/40 border border-white/10 rounded p-2 text-sm outline-none focus:border-barcelo-gold"
+                        >
+                          {chapters.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+                        </select>
+                      </div>
+                      <button 
+                        onClick={handleGenerateFlashcards}
+                        disabled={isGeneratingFlashcards || !currentChapter}
+                        className="w-full bg-barcelo-gold text-barcelo-blue py-3 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-white transition-all disabled:opacity-50"
+                      >
+                        {isGeneratingFlashcards ? <Loader2 className="animate-spin" size={18} /> : <Brain size={18} />}
+                        Generar Flashcards
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-2">
+                  {flashcards.length > 0 ? (
+                    <div className="space-y-8">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm text-text-mut">Tarjeta {currentFlashcardIndex + 1} de {flashcards.length}</div>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => {
+                              setCurrentFlashcardIndex(prev => Math.max(0, prev - 1));
+                              setIsFlashcardFlipped(false);
+                            }}
+                            disabled={currentFlashcardIndex === 0}
+                            className="p-2 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 disabled:opacity-30"
+                          >
+                            <ChevronLeft size={20} />
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setCurrentFlashcardIndex(prev => Math.min(flashcards.length - 1, prev + 1));
+                              setIsFlashcardFlipped(false);
+                            }}
+                            disabled={currentFlashcardIndex === flashcards.length - 1}
+                            className="p-2 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 disabled:opacity-30"
+                          >
+                            <ChevronRight size={20} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div 
+                        className="perspective-1000 w-full h-[400px] cursor-pointer group"
+                        onClick={() => setIsFlashcardFlipped(!isFlashcardFlipped)}
+                      >
+                        <motion.div 
+                          animate={{ rotateY: isFlashcardFlipped ? 180 : 0 }}
+                          transition={{ duration: 0.6, type: 'spring', stiffness: 260, damping: 20 }}
+                          className="relative w-full h-full preserve-3d"
+                        >
+                          {/* Front */}
+                          <div className="absolute inset-0 backface-hidden bg-bg-surf border-2 border-barcelo-gold/30 rounded-2xl flex flex-col items-center justify-center p-10 text-center shadow-2xl">
+                            <div className="text-barcelo-gold text-[0.6rem] uppercase tracking-widest mb-4">Pregunta</div>
+                            <div className="text-2xl font-serif leading-relaxed">{flashcards[currentFlashcardIndex].front}</div>
+                            <div className="mt-8 text-text-mut text-xs animate-pulse">Haz clic para ver la respuesta</div>
+                          </div>
+                          {/* Back */}
+                          <div className="absolute inset-0 backface-hidden bg-barcelo-blue/20 border-2 border-barcelo-bordeaux rounded-2xl flex flex-col items-center justify-center p-10 text-center shadow-2xl rotate-y-180">
+                            <div className="text-barcelo-bordeaux text-[0.6rem] uppercase tracking-widest mb-4">Respuesta</div>
+                            <div className="text-xl leading-relaxed">{flashcards[currentFlashcardIndex].back}</div>
+                            <div className="mt-8 text-text-mut text-xs">Haz clic para volver a la pregunta</div>
+                          </div>
+                        </motion.div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="h-[400px] bg-bg-surf/50 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center text-center p-10">
+                      <Layers size={48} className="text-text-mut mb-4 opacity-20" />
+                      <h3 className="text-xl font-serif text-text-mut mb-2">No hay flashcards generadas</h3>
+                      <p className="text-text-mut text-sm max-w-xs">Selecciona un capítulo y haz clic en "Generar Flashcards" para comenzar tu sesión de estudio.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {activeView === 'eval' && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
               <div className="border-b border-white/10 pb-5">
@@ -742,7 +905,7 @@ export default function Platform() {
                       <div className={`w-8 h-8 min-w-[8 corner] rounded-full flex items-center justify-center font-serif text-sm border ${msg.role === 'bot' ? 'bg-barcelo-gold/20 border-barcelo-gold text-barcelo-gold' : 'bg-barcelo-blue/30 border-barcelo-blue text-white'}`}>
                         {msg.role === 'bot' ? 'C' : 'U'}
                       </div>
-                      <div className={`p-3 rounded-xl text-sm leading-relaxed border ${msg.role === 'bot' ? 'bg-white/5 border-white/10 rounded-tl-none' : 'bg-barcelo-blue/40 border-barcelo-blue rounded-tr-none'}`}>
+                      <div className={`p-3 rounded-xl text-sm leading-relaxed border whitespace-pre-wrap ${msg.role === 'bot' ? 'bg-white/5 border-white/10 rounded-tl-none' : 'bg-barcelo-blue/40 border-barcelo-blue rounded-tr-none'}`}>
                         {msg.image && (
                           <img src={msg.image} alt="Upload" className="max-w-full h-auto rounded-lg mb-2 border border-white/10" />
                         )}
@@ -784,13 +947,18 @@ export default function Platform() {
                       <ImageIcon size={18} />
                       <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
                     </label>
-                    <input 
-                      type="text" 
+                    <textarea 
                       value={aiInput}
                       onChange={e => setAiInput(e.target.value)}
-                      onKeyPress={e => e.key === 'Enter' && sendAIMessage()}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          sendAIMessage();
+                        }
+                      }}
                       placeholder={useSearch ? "Buscando en Google..." : "Haz tu consulta médica..."}
-                      className="flex-1 bg-white/5 border border-white/10 rounded-full px-4 py-2 text-sm outline-none focus:border-barcelo-gold transition-all"
+                      className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm outline-none focus:border-barcelo-gold transition-all resize-none min-h-[40px] max-h-[120px]"
+                      rows={1}
                     />
                     <button onClick={sendAIMessage} className="bg-barcelo-bordeaux text-white w-10 h-10 rounded-full flex items-center justify-center hover:bg-barcelo-gold hover:text-black transition-all">
                       <Send size={18} />
